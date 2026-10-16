@@ -1,0 +1,101 @@
+================================================================================
+ SELKIES (WAYLAND) + PELORUS ON LXC - SERVICE TROUBLESHOOTING CHEATSHEET
+================================================================================
+
+1. CHECK SYSTEMD SERVICE STATUS
+--------------------------------------------------------------------------------
+# Check user services (Selkies streaming, KDE desktop, PulseAudio sound)
+systemctl --user status selkies desktop pulseaudio
+
+# Check system Nginx web server / reverse proxy
+sudo systemctl status nginx
+
+
+2. VIEW SERVICE LOGS (JOURNALCTL)
+--------------------------------------------------------------------------------
+# A. Selkies streaming service logs
+# Look for: "Socket listening on: wayland-1", "Renderer: GL on ...", "Selkies server running"
+journalctl --user -u selkies -n 50 --no-pager
+
+# Follow Selkies logs in real time:
+journalctl --user -u selkies -f
+
+# B. Desktop session logs (KDE Plasma 6 + KWin Wayland + Pelorus AI)
+# Look for: "Connected to Selkies Wayland compositor on .../wayland-1"
+# Look for: "Starting KWin Wayland nested compositor..."
+# Look for: "Pelorus started on port 5100 (PID: ...)"
+# Look for: "Starting plasmashell..."
+journalctl --user -u desktop -n 80 --no-pager
+
+# Pelorus AI navigator logs:
+cat /tmp/pelorus.log
+
+# Follow Desktop session logs in real time:
+journalctl --user -u desktop -f
+
+# C. PulseAudio sound daemon logs
+journalctl --user -u pulseaudio -n 30 --no-pager
+
+# D. Nginx web server logs
+sudo journalctl -u nginx -n 30 --no-pager
+
+
+3. VERIFY WAYLAND SOCKETS AND RUNNING PROCESSES
+--------------------------------------------------------------------------------
+# Both Wayland sockets must exist:
+# wayland-1 (created by Selkies / Pixelflux)
+# wayland-0 (created by nested KWin for KDE Plasma apps)
+ls -l "$XDG_RUNTIME_DIR"/wayland-*
+
+# Check that all core processes are running (should print PIDs for each):
+pgrep -a -l 'kwin_wayland|plasmashell|pelorus|selkies'
+
+# Check audio sinks and sources (should show "output" sink and "input" source):
+pactl list short sinks
+pactl list short sources
+
+
+4. VERIFY LISTENING NETWORK PORTS
+--------------------------------------------------------------------------------
+# Expected ports:
+# :3000  -> Nginx HTTP
+# :3001  -> Nginx HTTPS
+# :5000  -> Pixelflux Computer Use API (used by Pelorus)
+# :5100  -> Pelorus FastAPI server (AI agent)
+# :8080 / :8082 -> Selkies daemon / WebSockets
+ss -ltnp | grep -E ':(3000|3001|5000|5100|8080|8082)\b'
+
+
+5. TEST API AND HTTP RESPONSES (CURL)
+--------------------------------------------------------------------------------
+# Test Nginx HTTPS root (should return HTTP/1.1 200 OK):
+curl -skI https://localhost:3001/ | head -n 5
+
+# Test Selkies direct API and WebSocket backend on port 8082 (should return 200 OK):
+curl -s http://127.0.0.1:8082/api/health
+curl -s http://127.0.0.1:8082/api/status
+
+# Test Selkies API via Nginx reverse proxy (should return 200 OK):
+curl -s http://127.0.0.1:3000/api/health
+
+# Test Pelorus reverse proxy route (should return HTTP/1.1 200 OK):
+curl -skI https://localhost:3001/pelorus/ | head -n 5
+
+# Test Pelorus direct FastAPI docs / health:
+curl -sI http://127.0.0.1:5100/docs | head -n 5
+
+# Test Pixelflux Computer Use API:
+curl -s http://127.0.0.1:5000/
+
+
+6. RESTART SERVICES IF NEEDED
+--------------------------------------------------------------------------------
+# Restart both Selkies and desktop session:
+systemctl --user restart selkies desktop
+
+# Restart only the desktop session:
+systemctl --user restart desktop
+
+# Reload Nginx:
+sudo nginx -t && sudo systemctl reload nginx
+================================================================================

@@ -1,0 +1,18 @@
+[Unit]
+Description=Selkies WebRTC streaming service (Wayland mode)
+Requires=pulseaudio.service
+After=pulseaudio.service
+
+[Service]
+ExecStart=/lsiopy/bin/selkies --addr=localhost --port=8082 --mode=websockets
+WorkingDirectory=/lsiopy
+Restart=always
+RestartSec=3
+EnvironmentFile=-%h/.config/selkies/selkies.env
+Environment=LD_PRELOAD=/usr/lib/selkies_input_interposer.so:/opt/lib/libudev.so.1.0.0-fake
+Environment=PULSE_RUNTIME_PATH=%t/pulse
+Environment=VIRTUAL_ENV=/lsiopy
+Environment=PATH=/lsiopy/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

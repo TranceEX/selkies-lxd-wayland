@@ -1,0 +1,16 @@
+[Unit]
+Description=Desktop session service for Selkies (KDE Plasma on Wayland)
+Requires=selkies.service
+After=selkies.service
+PartOf=selkies.service
+
+[Service]
+ExecStart=/usr/local/bin/selkies-startwm-wayland.sh
+Restart=always
+RestartSec=3
+EnvironmentFile=-%h/.config/selkies/selkies.env
+Environment=PULSE_RUNTIME_PATH=%t/pulse
+Environment=PATH=/lsiopy/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target
