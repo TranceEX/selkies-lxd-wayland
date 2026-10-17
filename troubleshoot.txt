@@ -20,11 +20,11 @@ journalctl --user -u selkies -n 50 --no-pager
 # Follow Selkies logs in real time:
 journalctl --user -u selkies -f
 
-# B. Desktop session logs (KDE Plasma 6 + KWin Wayland + Pelorus AI)
+# B. Desktop session logs (KDE / XFCE on Wayland + Pelorus AI)
 # Look for: "Connected to Selkies Wayland compositor on .../wayland-1"
-# Look for: "Starting KWin Wayland nested compositor..."
+# Look for: "Starting KWin Wayland nested compositor..." (KDE) or "Starting Labwc nested compositor..." (XFCE)
 # Look for: "Pelorus started on port 5100 (PID: ...)"
-# Look for: "Starting plasmashell..."
+# Look for: "Starting plasmashell..." (KDE) or "Starting xfce4-session..." (XFCE)
 journalctl --user -u desktop -n 80 --no-pager
 
 # Pelorus AI navigator logs:
@@ -44,11 +44,11 @@ sudo journalctl -u nginx -n 30 --no-pager
 --------------------------------------------------------------------------------
 # Both Wayland sockets must exist:
 # wayland-1 (created by Selkies / Pixelflux)
-# wayland-0 (created by nested KWin for KDE Plasma apps)
+# wayland-0 (created by nested KWin or Labwc for session apps)
 ls -l "$XDG_RUNTIME_DIR"/wayland-*
 
 # Check that all core processes are running (should print PIDs for each):
-pgrep -a -l 'kwin_wayland|plasmashell|pelorus|selkies'
+pgrep -a -l 'kwin_wayland|plasmashell|labwc|xfce4-session|pelorus|selkies'
 
 # Check audio sinks and sources (should show "output" sink and "input" source):
 pactl list short sinks

@@ -1,5 +1,5 @@
 [Unit]
-Description=Desktop session service for Selkies (KDE Plasma on Wayland)
+Description=Desktop session service for Selkies (KDE/XFCE on Wayland)
 Requires=selkies.service
 After=selkies.service
 PartOf=selkies.service

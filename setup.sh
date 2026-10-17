@@ -3,37 +3,100 @@ set -eo pipefail
 
 echo "=== Starting Selkies (Wayland) + Pelorus installation on LXC ==="
 
-# 1. Set variables
+# 1. Verify supported CPU architecture
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64|aarch64)
+    echo "[OK] Supported CPU architecture: $ARCH"
+    ;;
+  *)
+    echo "ERROR: Unsupported CPU architecture '$ARCH'. Only x86_64 and aarch64 are supported." >&2
+    exit 1
+    ;;
+esac
+
+# 2. Select Desktop Environment (KDE or XFCE)
+DESKTOP_ENV="${DESKTOP_ENV:-${1:-}}"
+if [ -z "$DESKTOP_ENV" ] && [ -f ~/.config/selkies/selkies.env ]; then
+  saved_de=$(grep "^DESKTOP_ENVIRONMENT=" ~/.config/selkies/selkies.env 2>/dev/null | cut -d= -f2- | tr -d ' "\r' || true)
+  [ -n "$saved_de" ] && DESKTOP_ENV="$saved_de"
+fi
+
+if [ -z "$DESKTOP_ENV" ]; then
+  if [ -t 0 ]; then
+    echo "--------------------------------------------------"
+    echo "Select Desktop Environment to install:"
+    echo "  1) KDE Plasma (Wayland) [default]"
+    echo "  2) XFCE (Wayland + Labwc)"
+    echo "--------------------------------------------------"
+    read -rp "Enter choice [1-2, default 1]: " de_choice || de_choice=""
+    case "$de_choice" in
+      2|xfce|XFCE)
+        DESKTOP_ENV="xfce"
+        ;;
+      *)
+        DESKTOP_ENV="kde"
+        ;;
+    esac
+  else
+    DESKTOP_ENV="kde"
+  fi
+fi
+
+case "${DESKTOP_ENV,,}" in
+  xfce)
+    DESKTOP_ENV="xfce"
+    ;;
+  *)
+    DESKTOP_ENV="kde"
+    ;;
+esac
+echo "[OK] Selected Desktop Environment: $DESKTOP_ENV"
+
+# 3. Set variables
 export PATH="$HOME/.local/bin:$PATH"
 echo "[OK] Variables Set"
 
-# 2. Create required directories
+# 4. Create required directories
 mkdir -p ~/.config/rclone ~/.config/selkies ~/.config/systemd/user "$HOME/Desktop"
 sudo mkdir -p /root/.config/rclone
 touch ~/.config/rclone/rclone.conf
 sudo touch /root/.config/rclone/rclone.conf
 
-# 3. Install system packages
-echo "--- Updating repositories and installing system packages ---"
+# 5. Install system packages
+echo "--- Updating repositories and installing system packages for $DESKTOP_ENV ---"
 sudo apt update
-sudo DEBIAN_FRONTEND=noninteractive apt install -yq \
-  acl curl git libepoxy0 libnginx-mod-http-fancyindex locales-all nginx pipx pulseaudio ssl-cert unzip \
-  x11-xkb-utils xcvt xdotool xclip xsel \
-  kde-plasma-desktop kwin-wayland xwayland qt6-wayland polkit-kde-agent-1 at-spi2-core dbus-user-session \
-  wl-clipboard libkf6config-bin libkf6service-bin python3 python3-pip \
+
+COMMON_PACKAGES=(
+  acl curl git libepoxy0 libnginx-mod-http-fancyindex locales-all nginx pipx pulseaudio ssl-cert unzip
+  x11-xkb-utils xcvt xdotool xclip xsel xwayland
+  at-spi2-core dbus-user-session wl-clipboard python3 python3-pip
   python3-gi python3-gi-cairo gir1.2-atspi-2.0 gir1.2-gtk-3.0
+)
+
+if [ "$DESKTOP_ENV" = "xfce" ]; then
+  DE_PACKAGES=(
+    xfce4 xfce4-terminal xfce4-goodies firefox-esr labwc mate-polkit adwaita-icon-theme
+  )
+else
+  DE_PACKAGES=(
+    kde-plasma-desktop kwin-wayland qt6-wayland polkit-kde-agent-1 libkf6config-bin libkf6service-bin
+  )
+fi
+
+sudo DEBIAN_FRONTEND=noninteractive apt install -yq "${COMMON_PACKAGES[@]}" "${DE_PACKAGES[@]}"
 sudo apt clean
 
-# 4. Install rclone (if not present)
+# 6. Install rclone (if not present)
 if ! command -v rclone >/dev/null 2>&1; then
   echo "--- Installing rclone ---"
   curl -fsSL https://rclone.org/install.sh | sudo bash
 fi
 
-# 5. Add user to audio and video groups
+# 7. Add user to audio and video groups
 sudo usermod -aG audio,video "$USER"
 
-# 6. Pull and extract Selkies components via udocker
+# 8. Pull and extract Selkies components via udocker
 echo "--- Pulling Selkies image via udocker ---"
 pipx install udocker 2>/dev/null || pipx upgrade udocker 2>/dev/null || true
 SELKIES_IMAGE="${SELKIES_IMAGE:-lsiobase/selkies:debiantrixie-c5555162-ls138}"
@@ -69,7 +132,7 @@ fi
 sudo ln -sf /lsiopy/bin/selkies /usr/local/bin/selkies
 sudo ln -sf /lsiopy/bin/pelorus /usr/local/bin/pelorus
 
-# 7. Check for missing dynamic library dependencies in /lsiopy
+# 9. Check for missing dynamic library dependencies in /lsiopy
 echo "--- Checking dynamic library dependencies in /lsiopy ---"
 MISSING_LIBS=$(find /lsiopy -name "*.so*" -exec ldd {} + 2>/dev/null | grep "not found" | sort -u || true)
 if [ -n "$MISSING_LIBS" ]; then
@@ -79,13 +142,15 @@ else
   echo "[OK] All library dependencies in /lsiopy are satisfied."
 fi
 
-# 8. Reset capabilities on kwin_wayland (required for unprivileged LXC containers)
-if command -v kwin_wayland >/dev/null 2>&1; then
-  sudo setcap -r "$(command -v kwin_wayland)" 2>/dev/null || true
-  echo "[OK] Removed capabilities from kwin_wayland for proper unprivileged LXC operation."
-fi
+# 10. Reset capabilities on compositors (required for unprivileged LXC containers)
+for comp in kwin_wayland labwc; do
+  if command -v "$comp" >/dev/null 2>&1; then
+    sudo setcap -r "$(command -v "$comp")" 2>/dev/null || true
+    echo "[OK] Removed capabilities from $comp for proper unprivileged LXC operation."
+  fi
+done
 
-# 9. Prepare configuration directory for Pelorus AI (/config/agent)
+# 11. Prepare configuration directory for Pelorus AI (/config/agent)
 sudo install -d -m 0755 -o "$USER" -g "$(id -gn)" /config /config/agent
 sudo chown -R "$USER:$(id -gn)" /config 2>/dev/null || true
 
@@ -97,29 +162,43 @@ sudo tee /etc/tmpfiles.d/x11-unix.conf > /dev/null <<EOF
 d /tmp/.X11-unix 1777 root root -
 EOF
 
-# 10. Install session scripts to /usr/local/bin
+# 12. Install session scripts to /usr/local/bin
 echo "--- Installing Wayland session scripts ---"
 sudo cp selkies-startwm-wayland.sh /usr/local/bin/selkies-startwm-wayland.sh
 sudo chmod 755 /usr/local/bin/selkies-startwm-wayland.sh
 sudo cp kwin-xwayland.py /usr/local/bin/kwin-xwayland.py
 sudo chmod 755 /usr/local/bin/kwin-xwayland.py
 
-# 11. Install or update environment file selkies.env
+# 13. Install or update environment file selkies.env
 if [ ! -f ~/.config/selkies/selkies.env ]; then
   cp selkies.env ~/.config/selkies/selkies.env
   echo "[OK] Created ~/.config/selkies/selkies.env"
-else
-  # Ensure critical ports and settings are present in existing configuration
-  for cfg_line in "CUSTOM_WS_PORT=8082" "SELKIES_PORT=8082" "SELKIES_COMPUTER_USE_BIND=5000" "SELKIES_APP_WAYLAND_DISPLAY=wayland-0"; do
-    cfg_key="${cfg_line%%=*}"
-    if ! grep -q "^${cfg_key}=" ~/.config/selkies/selkies.env; then
-      echo "$cfg_line" >> ~/.config/selkies/selkies.env
-    fi
-  done
-  echo "[INFO] Verified and synchronized ~/.config/selkies/selkies.env configuration."
 fi
 
-# 12. Configure PulseAudio services (null-sinks)
+# Synchronize desktop environment and Pelorus environment settings
+sed -i '/^DESKTOP_ENVIRONMENT=/d' ~/.config/selkies/selkies.env
+echo "DESKTOP_ENVIRONMENT=$DESKTOP_ENV" >> ~/.config/selkies/selkies.env
+
+if [ "$DESKTOP_ENV" = "xfce" ]; then
+  sed -i '/^PELORUS_ENVIRONMENT=/d' ~/.config/selkies/selkies.env
+  echo 'PELORUS_ENVIRONMENT="XFCE Desktop (Linux)"' >> ~/.config/selkies/selkies.env
+  sed -i 's/^TITLE=.*/TITLE=Debian-13 (XFCE)/' ~/.config/selkies/selkies.env
+else
+  sed -i '/^PELORUS_ENVIRONMENT=/d' ~/.config/selkies/selkies.env
+  echo 'PELORUS_ENVIRONMENT="KDE Plasma Desktop (Linux)"' >> ~/.config/selkies/selkies.env
+  sed -i 's/^TITLE=.*/TITLE=Debian-13 (KDE)/' ~/.config/selkies/selkies.env
+fi
+
+# Ensure critical ports and settings are present in existing configuration
+for cfg_line in "CUSTOM_WS_PORT=8082" "SELKIES_PORT=8082" "SELKIES_COMPUTER_USE_BIND=5000" "SELKIES_APP_WAYLAND_DISPLAY=wayland-0"; do
+  cfg_key="${cfg_line%%=*}"
+  if ! grep -q "^${cfg_key}=" ~/.config/selkies/selkies.env; then
+    echo "$cfg_line" >> ~/.config/selkies/selkies.env
+  fi
+done
+echo "[INFO] Verified and synchronized ~/.config/selkies/selkies.env configuration."
+
+# 14. Configure PulseAudio services (null-sinks)
 echo "--- Configuring PulseAudio ---"
 sudo mkdir -p /etc/pulse/default.pa.d
 sudo tee /etc/pulse/default.pa.d/selkies.pa > /dev/null <<EOF
@@ -127,21 +206,21 @@ load-module module-null-sink sink_name="output" sink_properties=device.descripti
 load-module module-null-sink sink_name="input" sink_properties=device.description="input"
 EOF
 
-# 13. Disable PipeWire in favor of PulseAudio
+# 15. Disable PipeWire in favor of PulseAudio
 systemctl --user disable pipewire.service pipewire.socket wireplumber.service pipewire-pulse.service pipewire-pulse.socket 2>/dev/null || true
 systemctl --user mask pipewire.service pipewire.socket wireplumber.service pipewire-pulse.service pipewire-pulse.socket 2>/dev/null || true
 
-# 14. Run Nginx and Selkies initialization scripts
+# 16. Run Nginx and Selkies initialization scripts
 echo "--- Initializing Nginx and Selkies configuration ---"
 export CUSTOM_WS_PORT="${CUSTOM_WS_PORT:-8082}"
 sudo --preserve-env=PASSWORD,CUSTOM_PORT,CUSTOM_HTTPS_PORT,CUSTOM_WS_PORT,SUBFOLDER,DASHBOARD,DISABLE_IPV6,SELKIES_FILE_TRANSFERS,HARDEN_DESKTOP,PELORUS,SELKIES_ROOTFS,SELKIES_IMAGE,SELKIES_TAG bash 01-init-nginx.sh
 sudo bash 02-init-selkies-config.sh
 
-# 15. Remove temporary udocker container and image
+# 17. Remove temporary udocker container and image
 udocker rm selkies_tmp 2>/dev/null || true
 udocker rmi "$SELKIES_IMAGE" 2>/dev/null || true
 
-# 16. Install systemd user units
+# 18. Install systemd user units
 echo "--- Installing systemd units for user session ---"
 # Remove legacy xvfb service if previously active
 if systemctl --user is-active --quiet xvfb 2>/dev/null || systemctl --user is-enabled --quiet xvfb 2>/dev/null; then
@@ -151,7 +230,7 @@ rm -f ~/.config/systemd/user/xvfb.service
 
 cp selkies.service desktop.service ~/.config/systemd/user/
 
-# 17. Enable and start systemd user services
+# 19. Enable and start systemd user services
 loginctl enable-linger "$USER"
 systemctl --user daemon-reexec
 systemctl --user daemon-reload

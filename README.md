@@ -1,6 +1,6 @@
 # selkies-lxd-wayland (Wayland + Pelorus)
 
-Installation and setup scripts for Selkies in native **Wayland** mode with **Pelorus** AI navigator for **LXC/LXD** containers.
+Installation and setup scripts for Selkies in native **Wayland** mode with **Pelorus** AI navigator for **LXC/LXD** containers. Supports **KDE Plasma** and **XFCE**.
 
 Based on [Selkies Base Images from LinuxServer.io](https://github.com/linuxserver/docker-baseimage-selkies), but runs natively inside an LXC container under `systemd --user` control without requiring Docker.
 
@@ -9,24 +9,26 @@ Based on [Selkies Base Images from LinuxServer.io](https://github.com/linuxserve
 ## Architecture Overview
 
 - **Pixelflux (Smithay)**: In-process Wayland compositor inside the Selkies daemon listening on socket `wayland-1` (WebRTC / HTTPS streaming).
-- **KWin Wayland (Nested)**: Operates as a Wayland client to Pixelflux (`wayland-1`) and simultaneously as the Wayland compositor for session applications (`wayland-0`).
-- **XWayland**: Provides compatibility for legacy X11 applications at deterministic `DISPLAY=:1` (managed via `kwin-xwayland.py`).
-- **Pelorus**: AI navigation agent (FastAPI on port 5100, proxied via Nginx at `/pelorus/`), collecting window state from KWin via D-Bus and accessibility trees via AT-SPI2, dispatching input actions to the Pixelflux Computer Use API (port 5000).
+- **Nested Wayland Compositor**:
+  - **KDE Plasma**: Uses **KWin Wayland** (nested client to `wayland-1`, hosting `wayland-0` and XWayland).
+  - **XFCE**: Uses **Labwc** (wlroots-based stacking compositor nested to `wayland-1`, hosting `wayland-0` and XWayland).
+- **XWayland**: Provides compatibility for legacy X11 applications.
+- **Pelorus**: AI navigation agent (FastAPI on port 5100, proxied via Nginx at `/pelorus/`), collecting window state and accessibility trees via AT-SPI2 / D-Bus, dispatching input actions to the Pixelflux Computer Use API (port 5000).
 - **PulseAudio**: Audio handling with virtual null-sinks `output` and `input`.
 
 ---
 
 ## Requirements
 
-1. **LXC/LXD Container**
-
-2. **Optional GPU Acceleration**:
+1. **LXC/LXD Container** (Debian 13 Trixie or compatible)
+2. **Supported Architectures**: `x86_64` or `aarch64`.
+3. **Optional GPU Acceleration**:
    - By default, software rendering is enabled (`KWIN_COMPOSE=Q`).
    - If GPU passthrough is configured from the LXD host:
      ```bash
      lxc config device add <container_name> gpu gpu
      ```
-     Set `KWIN_COMPOSE=O2` (OpenGL 2) in `~/.config/selkies/selkies.env`.
+     Set `KWIN_COMPOSE=O2` (OpenGL) in `~/.config/selkies/selkies.env`.
 
 ---
 
@@ -40,9 +42,24 @@ cd selkies-lxd-wayland
 bash setup.sh
 ```
 
+You can select the Desktop Environment interactively during setup, or specify it via argument or environment variable:
+
+```bash
+# Install with XFCE (Wayland + Labwc)
+DESKTOP_ENV=xfce bash setup.sh
+# or
+bash setup.sh xfce
+
+# Install with KDE Plasma (default)
+DESKTOP_ENV=kde bash setup.sh
+# or
+bash setup.sh kde
+```
+
 The script will automatically:
 
-- Install system packages for KDE Plasma, KWin Wayland, Nginx, PulseAudio, and utilities.
+- Verify CPU architecture (`x86_64` or `aarch64`).
+- Install system packages for the chosen desktop environment (KDE Plasma or XFCE + Labwc), Nginx, PulseAudio, and utilities.
 - Pull the Selkies image via udocker and extract the input interposer (`selkies_input_interposer.so`), `/lsiopy`, and web assets.
 - Configure Nginx with SSL certificates and Pelorus reverse proxy.
 - Install and enable `systemd --user` services (`pulseaudio`, `selkies`, `desktop`).
@@ -54,6 +71,7 @@ The script will automatically:
 The main environment configuration file is installed at `~/.config/selkies/selkies.env`. Changes take effect after restarting user services (`systemctl --user restart selkies desktop`).
 
 Key environment variables:
+- `DESKTOP_ENVIRONMENT=kde` - Target desktop: `kde` (KDE Plasma) or `xfce` (XFCE + Labwc).
 - `PIXELFLUX_WAYLAND=true` - Enables Wayland mode in Pixelflux.
 - `PIXELFLUX_CU=5000` - Pixelflux Computer Use API port (required by Pelorus).
 - `PELORUS=true` - Activates the Pelorus agent and web UI.
@@ -61,7 +79,7 @@ Key environment variables:
 - `PELORUS_ENDPOINT` - Model API endpoint URL (e.g. `http://localhost:11434`).
 - `PELORUS_MODEL` - Model name (e.g. `gemma4:12b`).
 - `PELORUS_API_KEY` - Optional API key.
-- `KWIN_COMPOSE=Q` - KWin compositor backend (`Q` for software/QPainter, `O2` for OpenGL with GPU passthrough).
+- `KWIN_COMPOSE=Q` - Compositor backend (`Q` for software rendering, `O2` for OpenGL with GPU passthrough).
 
 Pelorus server configurations are stored in `/config/agent/config.toml` and can also be modified at runtime via the `/pelorus/` web interface.
 
